@@ -9,7 +9,7 @@ use anyhow::Result;
 
 use crate::{
     app::{repository::TodoRepository, service::TodoService},
-    domain::todo::{Title, Todo, TodoId},
+    domain::todo::{Title, Todo, TodoId, TodoPatch},
 };
 
 /// App store that owns stateful dependencies.
@@ -48,5 +48,9 @@ where
         for todo in todos {
             self.insert_todo(todo);
         }
+    }
+
+    pub fn edit_todo(&mut self, id: TodoId, patch: TodoPatch) -> Result<bool> {
+        self.service.edit_todo(id, patch)
     }
 }

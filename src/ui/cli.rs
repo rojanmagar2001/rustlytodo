@@ -57,6 +57,40 @@ enum Commands {
 
     /// List todos
     List,
+
+    /// Edit an existing todo by short ID (from `list`)
+    Edit {
+        /// Short ID (first 8 chars shown in list)
+        id: String,
+
+        #[arg(long)]
+        title: Option<String>,
+
+        #[arg(long)]
+        notes: Option<String>,
+
+        #[arg(long)]
+        clear_notes: bool,
+
+        #[arg(long)]
+        project: Option<String>,
+
+        #[arg(long)]
+        priority: Option<String>,
+
+        #[arg(long)]
+        due: Option<String>,
+
+        #[arg(long)]
+        clear_due: bool,
+
+        /// Replace tags entirely (repeatable): --tag work --tag urgent
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+
+        #[arg(long)]
+        clear_tags: bool,
+    },
 }
 
 /// Peek `--debug` from args without fully running the CLI.
@@ -173,7 +207,77 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 }
             }
         }
+        Commands::Edit {
+            id,
+            title,
+            notes,
+            clear_notes,
+            project,
+            priority,
+            due,
+            clear_due,
+            tags,
+            clear_tags,
+        } => {
+            use crate::domain::todo::{DueAt, Notes, Priority, ProjectName, Tag, Title, TodoPatch};
+            use std::collections::BTreeSet;
+
+            let todos = store.list_todos();
+            let Some(todo_id) = resolve_short_id(&todos, &id) else {
+                println!("No todo found with id prefix: {}", id);
+                return Ok(());
+            };
+
+            let mut patch = TodoPatch::default();
+
+            if let Some(t) = title {
+                patch.title = Some(Title::parse(t)?)
+            }
+
+            if clear_notes {
+                patch.notes = Some(None);
+            } else if let Some(n) = notes {
+                patch.notes = Some(Some(Notes::parse(n)?));
+            }
+
+            if let Some(p) = project {
+                patch.project = Some(ProjectName::parse(p)?);
+            }
+            if let Some(p) = priority {
+                patch.priority = Some(Priority::parse(p)?);
+            }
+
+            if clear_due {
+                patch.due = Some(None);
+            } else if let Some(d) = due {
+                patch.due = Some(Some(DueAt::parse_rfc3339(d)?));
+            }
+
+            if clear_tags {
+                patch.tags = Some(BTreeSet::new());
+            } else if !tags.is_empty() {
+                let mut set = BTreeSet::new();
+                for t in tags {
+                    set.insert(Tag::parse(t)?);
+                }
+                patch.tags = Some(set);
+            }
+
+            let changed = store.edit_todo(todo_id, patch)?;
+            if changed {
+                println!("Edited {}", id);
+            } else {
+                println!("Failed to edit {}", id);
+            }
+        }
     }
 
     Ok(())
+}
+
+fn resolve_short_id(
+    todos: &[crate::domain::todo::Todo],
+    short: &str,
+) -> Option<crate::domain::todo::TodoId> {
+    todos.iter().find(|t| t.id.short() == short).map(|t| t.id)
 }

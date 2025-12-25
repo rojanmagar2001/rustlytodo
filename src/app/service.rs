@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::{
     app::repository::TodoRepository,
-    domain::todo::{Title, Todo, TodoId},
+    domain::todo::{Title, Todo, TodoId, TodoPatch},
 };
 
 /// High-level application service.
@@ -38,6 +38,15 @@ where
     /// This avoids UI or seed logic needing access to repository internals.
     pub fn insert_todo(&mut self, todo: Todo) {
         self.repo.add(todo);
+    }
+
+    pub fn edit_todo(&mut self, id: TodoId, patch: TodoPatch) -> Result<bool> {
+        if let Some(mut todo) = self.repo.get(id) {
+            todo.apply_patch(patch);
+            Ok(self.repo.replace(todo))
+        } else {
+            Ok(false)
+        }
     }
 }
 

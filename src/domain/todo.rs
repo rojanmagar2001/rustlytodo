@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
@@ -12,7 +13,7 @@ use crate::domain::errors::DomainError;
 /// Strongly-typed identifier for a Todo.
 ///
 /// Newtype pattern prevents mixing IDs accidentally.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TodoId(Uuid);
 
 impl TodoId {
@@ -38,7 +39,7 @@ impl TodoId {
 }
 
 /// Avalidated todo title.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Title(String);
 
 impl Title {
@@ -58,7 +59,7 @@ impl Title {
 }
 
 /// Notes (optional, validated).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Notes(String);
 
 impl Notes {
@@ -78,7 +79,7 @@ impl Notes {
 }
 
 /// Project/context name (validated).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ProjectName(String);
 
 impl ProjectName {
@@ -101,7 +102,7 @@ impl ProjectName {
 }
 
 /// Tag (validated + normalized to lowercase).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Tag(String);
 
 impl Tag {
@@ -132,7 +133,7 @@ impl Tag {
 /// Priority level.
 ///
 /// P1 is highest urgency; P4 is lowest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum Priority {
     P1,
     P2,
@@ -168,7 +169,7 @@ impl Priority {
 ///
 /// We store this as an `OffsetDateTime`. For now we treat input as RFC3339.
 /// Later we can add "friendly" parsing (e.g. `tomorrow 9am`) at the app/UI layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DueAt(OffsetDateTime);
 
 impl DueAt {
@@ -198,7 +199,7 @@ impl DueAt {
 /// Todo status.
 ///
 /// If Done, we record when it was completed (UTC).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
     Open,
     Done { completed_at: OffsetDateTime },
@@ -211,7 +212,7 @@ impl Status {
 }
 
 /// Core Todo entity
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Todo {
     pub id: TodoId,
     pub title: Title,
@@ -292,6 +293,58 @@ impl Todo {
         match self.due {
             Some(due) => due.as_dt() < now,
             None => false,
+        }
+    }
+}
+
+/// A patch for editing a Todo.
+///
+/// Any field set to `Some(...)` will be applied.
+/// Fields set to `None` will remain unchanged.
+///
+/// This is “builder-ish” and works well for CLI flags and TUI forms.
+#[derive(Debug, Default, Clone)]
+pub struct TodoPatch {
+    pub title: Option<Title>,
+    pub notes: Option<Option<Notes>>, // Some(None) means "clear notes"
+    pub project: Option<ProjectName>,
+    pub priority: Option<Priority>,
+    pub due: Option<Option<DueAt>>,  // Some(None) means "clear due"
+    pub tags: Option<BTreeSet<Tag>>, // if present, replaces full set
+}
+
+impl Todo {
+    /// Apply a patch and update `updated_at` if anything changed.
+    pub fn apply_patch(&mut self, patch: TodoPatch) {
+        let mut changed = false;
+
+        if let Some(title) = patch.title {
+            self.title = title;
+            changed = true;
+        }
+        if let Some(notes_opt) = patch.notes {
+            self.notes = notes_opt;
+            changed = true;
+        }
+        if let Some(project) = patch.project {
+            self.project = project;
+            changed = true;
+        }
+        if let Some(priority) = patch.priority {
+            self.priority = priority;
+            changed = true;
+        }
+        if let Some(due_opt) = patch.due {
+            self.due = due_opt;
+            changed = true;
+        }
+        if let Some(tags) = patch.tags {
+            self.tags = tags;
+            changed = true;
+        }
+
+        if changed {
+            self.updated_at = OffsetDateTime::now_utc();
         }
     }
 }
@@ -408,5 +461,18 @@ mod tests {
         todo.mark_done().unwrap();
         todo.mark_open().unwrap();
         assert_eq!(todo.status, Status::Open);
+    }
+
+    #[test]
+    fn apply_patch_updates_updated_at_when_changed() {
+        let mut todo = Todo::new(Title::parse("A").unwrap());
+        let before = todo.updated_at;
+
+        let mut patch = TodoPatch::default();
+        patch.priority = Some(Priority::P1);
+
+        todo.apply_patch(patch);
+        assert!(todo.updated_at >= before);
+        assert_eq!(todo.priority, Priority::P1);
     }
 }
