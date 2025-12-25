@@ -4,5 +4,6 @@
 
 pub mod context;
 pub mod repository;
+pub mod seed;
 pub mod service;
 pub mod store;

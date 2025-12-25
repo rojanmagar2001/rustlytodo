@@ -34,4 +34,16 @@ where
     pub fn list_todos(&self) -> Vec<Todo> {
         self.service.list_todos()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.list_todos().is_empty()
+    }
+
+    pub fn add_many(&mut self, todos: Vec<Todo>) {
+        for todo in todos {
+            // Directly add via repository semantics
+            // (we already have validated domain objects)
+            _ = self.service.repo.add(todo);
+        }
+    }
 }

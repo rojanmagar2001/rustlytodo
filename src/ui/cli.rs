@@ -56,6 +56,12 @@ pub fn run(ctx: AppContext) -> Result<()> {
     let repo = MemoryTodoRepository::new();
     let mut store = Store::new(repo);
 
+    // Seed default todos if empty (dev / first-run UX)
+    if store.is_empty() {
+        let defaults = crate::app::seed::default_todos();
+        store.add_many(defaults);
+    }
+
     match cli.command.unwrap_or(Commands::Tui) {
         Commands::Tui => {
             // Placeholder until Milestone 5 (ratatui foundation).
@@ -73,10 +79,24 @@ pub fn run(ctx: AppContext) -> Result<()> {
             if todos.is_empty() {
                 println!("No todos yet 🎉");
             } else {
-                // Column-ish output (simple, no extra deps)
-                println!("{:<10} {}", "ID", "TITLE");
+                println!(
+                    "{:<10} {:<2} {:<3} {:<25} {}",
+                    "ID", "S", "P", "DUE", "TITLE"
+                );
                 for todo in todos {
-                    println!("{:<10} {}", todo.id.short(), todo.title.as_str());
+                    let due = todo
+                        .due
+                        .map(|d| d.format_rfc3339())
+                        .unwrap_or_else(|| "-".to_string());
+
+                    println!(
+                        "{:<10} {:<2} {:<3} {:<25} {}",
+                        todo.id.short(),
+                        todo.status_symbol(),
+                        todo.priority.label(),
+                        due,
+                        todo.title.as_str()
+                    );
                 }
             }
         }

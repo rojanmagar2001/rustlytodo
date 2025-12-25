@@ -11,7 +11,7 @@ use crate::{
 
 /// High-level application service.
 pub struct TodoService<R> {
-    repo: R,
+    pub repo: R,
 }
 
 impl<R> TodoService<R>
