@@ -2,6 +2,8 @@
 //!
 //! This is intentionally minimal for now.
 
+use std::collections::BTreeSet;
+
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
@@ -55,13 +57,86 @@ impl Title {
     }
 }
 
+/// Notes (optional, validated).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notes(String);
+
+impl Notes {
+    const MAX_LEN: usize = 10_000;
+
+    pub fn parse(input: impl AsRef<str>) -> Result<Self, DomainError> {
+        let s = input.as_ref().trim().to_string();
+        if s.len() > Self::MAX_LEN {
+            return Err(DomainError::NotesTooLong { max: Self::MAX_LEN });
+        }
+        Ok(Self(s))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Project/context name (validated).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ProjectName(String);
+
+impl ProjectName {
+    pub fn parse(input: impl AsRef<str>) -> Result<Self, DomainError> {
+        let trimmed = input.as_ref().trim();
+        if trimmed.is_empty() {
+            return Err(DomainError::EmptyProjectName);
+        }
+        Ok(Self(trimmed.to_string()))
+    }
+
+    pub fn inbox() -> Self {
+        // Safe default project.
+        Self("Inbox".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Tag (validated + normalized to lowercase).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Tag(String);
+
+impl Tag {
+    pub fn parse(input: impl AsRef<str>) -> Result<Self, DomainError> {
+        let raw = input.as_ref().trim();
+        if raw.is_empty() {
+            return Err(DomainError::EmptyTag);
+        }
+
+        let normalized = raw.to_ascii_lowercase();
+
+        let ok = normalized
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+
+        if !ok {
+            return Err(DomainError::InvalidTag);
+        }
+
+        Ok(Self(normalized))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Priority level.
 ///
 /// P1 is highest urgency; P4 is lowest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Priority {
     P1,
     P2,
+    #[default]
     P3,
     P4,
 }
@@ -89,12 +164,6 @@ impl Priority {
     }
 }
 
-impl Default for Priority {
-    fn default() -> Self {
-        Self::P3
-    }
-}
-
 /// Due datetime (UTC for now).
 ///
 /// We store this as an `OffsetDateTime`. For now we treat input as RFC3339.
@@ -107,6 +176,11 @@ impl DueAt {
         let s = input.as_ref().trim();
         let dt = OffsetDateTime::parse(s, &Rfc3339).map_err(|_| DomainError::InvalidDueAt)?;
         Ok(Self(dt))
+    }
+
+    /// Construct directly from a datetime (useful for programmatic creation / seeding).
+    pub fn from_dt(dt: OffsetDateTime) -> Self {
+        Self(dt)
     }
 
     pub fn as_dt(self) -> OffsetDateTime {
@@ -141,6 +215,9 @@ impl Status {
 pub struct Todo {
     pub id: TodoId,
     pub title: Title,
+    pub notes: Option<Notes>,
+    pub project: ProjectName,
+    pub tags: BTreeSet<Tag>,
     pub status: Status,
     pub priority: Priority,
     pub due: Option<DueAt>,
@@ -149,11 +226,21 @@ pub struct Todo {
 }
 
 impl Todo {
+    /// Create a new Todo with defaults:
+    /// - status = Open
+    /// - priority = P3
+    /// - due = None
+    /// - project = Inbox
+    /// - tags empty
+    /// - notes None
     pub fn new(title: Title) -> Self {
         let now = OffsetDateTime::now_utc();
         Self {
             id: TodoId::new(),
             title,
+            notes: None,
+            project: ProjectName::inbox(),
+            tags: BTreeSet::new(),
             status: Status::Open,
             priority: Priority::default(),
             due: None,
@@ -212,6 +299,38 @@ mod tests {
     fn title_parse_trims_and_accepts() {
         let title = Title::parse("  Buy milk  ").expect("valid title");
         assert_eq!(title.as_str(), "Buy milk");
+    }
+
+    #[test]
+    fn tag_is_normalized_to_lowercase() {
+        let t = Tag::parse("Work").unwrap();
+        assert_eq!(t.as_str(), "work");
+    }
+
+    #[test]
+    fn tag_rejects_invalid_chars() {
+        assert!(Tag::parse("hello!").is_err());
+        assert!(Tag::parse("space tag").is_err());
+    }
+
+    #[test]
+    fn project_name_requires_non_empty() {
+        assert!(ProjectName::parse("   ").is_err());
+        assert_eq!(ProjectName::parse("Work").unwrap().as_str(), "Work");
+    }
+
+    #[test]
+    fn notes_max_len_is_enforced() {
+        let big = "a".repeat(10_001);
+        assert!(Notes::parse(big).is_err());
+    }
+
+    #[test]
+    fn todo_defaults_project_inbox() {
+        let todo = Todo::new(Title::parse("A").unwrap());
+        assert_eq!(todo.project.as_str(), "Inbox");
+        assert!(todo.tags.is_empty());
+        assert!(todo.notes.is_none());
     }
 
     #[test]

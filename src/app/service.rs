@@ -32,6 +32,13 @@ where
     pub fn list_todos(&self) -> Vec<Todo> {
         self.repo.list()
     }
+
+    /// Insert a fully-constructed Todo (used for seeding / imports later).
+    ///
+    /// This avoids UI or seed logic needing access to repository internals.
+    pub fn insert_todo(&mut self, todo: Todo) {
+        self.repo.add(todo);
+    }
 }
 
 #[cfg(test)]

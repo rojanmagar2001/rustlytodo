@@ -39,11 +39,14 @@ where
         self.list_todos().is_empty()
     }
 
-    pub fn add_many(&mut self, todos: Vec<Todo>) {
+    /// Insert an already-built Todo (for seeding / import).
+    pub fn insert_todo(&mut self, todo: Todo) {
+        self.service.insert_todo(todo);
+    }
+
+    pub fn insert_many(&mut self, todos: Vec<Todo>) {
         for todo in todos {
-            // Directly add via repository semantics
-            // (we already have validated domain objects)
-            _ = self.service.repo.add(todo);
+            self.insert_todo(todo);
         }
     }
 }

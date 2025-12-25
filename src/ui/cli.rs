@@ -33,6 +33,18 @@ enum Commands {
     Add {
         /// Title of the todo
         title: String,
+
+        /// Project/context name (default: Inbox)
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Tags (repeatable): --tag work --tag urgent
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+
+        /// Optional notes
+        #[arg(long)]
+        notes: Option<String>,
     },
 
     /// List todos
@@ -56,10 +68,9 @@ pub fn run(ctx: AppContext) -> Result<()> {
     let repo = MemoryTodoRepository::new();
     let mut store = Store::new(repo);
 
-    // Seed default todos if empty (dev / first-run UX)
     if store.is_empty() {
         let defaults = crate::app::seed::default_todos();
-        store.add_many(defaults);
+        store.insert_many(defaults);
     }
 
     match cli.command.unwrap_or(Commands::Tui) {
@@ -68,9 +79,38 @@ pub fn run(ctx: AppContext) -> Result<()> {
             println!("TUI not implemented yet (coming in Milestone 5).");
             println!("For now try: todo add \"Buy milk\"   or   todo list");
         }
-        Commands::Add { title } => {
+        Commands::Add {
+            title,
+            project,
+            tags,
+            notes,
+        } => {
+            use crate::domain::todo::{Notes, ProjectName, Tag, Todo};
+            use std::collections::BTreeSet;
+
             let title = Title::parse(title)?;
-            let id = store.add_todo(title)?;
+            let mut todo = Todo::new(title);
+
+            if let Some(p) = project {
+                todo.project = ProjectName::parse(p)?;
+            }
+
+            if let Some(n) = notes {
+                todo.notes = Some(Notes::parse(n)?)
+            }
+
+            if !tags.is_empty() {
+                let mut set = BTreeSet::new();
+                for t in tags {
+                    set.insert(Tag::parse(t)?);
+                }
+                todo.tags = set;
+            }
+
+            // For now we insert the constructed todo directly.
+            // Later, add/edit will be proper use-cases with validation + events.
+            let id = todo.id;
+            store.insert_todo(todo);
             info!("Todo added");
             println!("Added {}", id.short());
         }
@@ -80,8 +120,8 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 println!("No todos yet 🎉");
             } else {
                 println!(
-                    "{:<10} {:<2} {:<3} {:<25} {}",
-                    "ID", "S", "P", "DUE", "TITLE"
+                    "{:<10} {:<2} {:<3} {:<10} {:<18} {:<25} TITLE",
+                    "ID", "S", "P", "PROJECT", "TAGS", "DUE"
                 );
                 for todo in todos {
                     let due = todo
@@ -89,11 +129,23 @@ pub fn run(ctx: AppContext) -> Result<()> {
                         .map(|d| d.format_rfc3339())
                         .unwrap_or_else(|| "-".to_string());
 
+                    let tags = if todo.tags.is_empty() {
+                        "-".to_string()
+                    } else {
+                        todo.tags
+                            .iter()
+                            .map(|t| format!("#{}", t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    };
+
                     println!(
-                        "{:<10} {:<2} {:<3} {:<25} {}",
+                        "{:<10} {:<2} {:<3} {:<10} {:<18} {:<25} {}",
                         todo.id.short(),
                         todo.status_symbol(),
                         todo.priority.label(),
+                        todo.project.as_str(),
+                        tags,
                         due,
                         todo.title.as_str()
                     );

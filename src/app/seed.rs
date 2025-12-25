@@ -1,47 +1,36 @@
-//! Default data seeding.
-//!
-//! This is used during early development and for first-run UX.
-//! Once persistence is implemented, this will only run if the database is empty.
+//! Default data seeding (first-run / dev UX).
 
+use std::collections::BTreeSet;
+
+use time::Duration;
 use time::OffsetDateTime;
 
-use crate::domain::todo::{DueAt, Priority, Title, Todo};
+use crate::domain::todo::{DueAt, Notes, Priority, ProjectName, Tag, Title, Todo};
 
-/// Generate a small set of default todos.
-///
-/// This function is pure: it just returns data.
 pub fn default_todos() -> Vec<Todo> {
     let now = OffsetDateTime::now_utc();
 
-    vec![
-        {
-            let mut t = Todo::new(Title::parse("Welcome to rustlytodo").unwrap());
-            t.priority = Priority::P2;
-            t
-        },
-        {
-            let mut t = Todo::new(Title::parse("Press ? to view keybindings").unwrap());
-            t.priority = Priority::P4;
-            t
-        },
-        {
-            let mut t = Todo::new(Title::parse("Add your first real task").unwrap());
-            t.priority = Priority::P3;
-            t
-        },
-        {
-            let mut t = Todo::new(Title::parse("Task with a due date").unwrap());
-            t.priority = Priority::P1;
-            t.due = Some(
-                DueAt::parse_rfc3339(
-                    now.replace_hour(17)
-                        .unwrap()
-                        .format(&time::format_description::well_known::Rfc3339)
-                        .unwrap(),
-                )
-                .unwrap(),
-            );
-            t
-        },
-    ]
+    let inbox = ProjectName::inbox();
+    let work = ProjectName::parse("Work").unwrap();
+
+    let mut t1 = Todo::new(Title::parse("Welcome to rustlytodo").unwrap());
+    t1.project = inbox.clone();
+    t1.priority = Priority::P2;
+    t1.notes = Some(Notes::parse("Tip: use `todo add \"...\" --tag work`").unwrap());
+
+    let mut t2 = Todo::new(Title::parse("Press ? to view keybindings (TUI later)").unwrap());
+    t2.project = inbox.clone();
+    t2.priority = Priority::P4;
+
+    let mut t3 = Todo::new(Title::parse("Fix CI flaky test").unwrap());
+    t3.project = work;
+    t3.priority = Priority::P1;
+    t3.due = Some(DueAt::from_dt(now + Duration::days(3)));
+
+    let mut tags = BTreeSet::new();
+    tags.insert(Tag::parse("rust").unwrap());
+    tags.insert(Tag::parse("build").unwrap());
+    t3.tags = tags;
+
+    vec![t1, t2, t3]
 }
