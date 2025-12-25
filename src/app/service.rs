@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use crate::{
     app::repository::TodoRepository,
-    domain::todo::{Title, Todo},
+    domain::todo::{Title, Todo, TodoId},
 };
 
 /// High-level application service.
@@ -22,10 +22,11 @@ where
         Self { repo }
     }
 
-    pub fn add_todo(&mut self, title: Title) -> Result<()> {
+    pub fn add_todo(&mut self, title: Title) -> Result<TodoId> {
         let todo = Todo::new(title);
+        let id = todo.id;
         self.repo.add(todo);
-        Ok(())
+        Ok(id)
     }
 
     pub fn list_todos(&self) -> Vec<Todo> {

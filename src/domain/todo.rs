@@ -16,6 +16,22 @@ impl TodoId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// A short, human-friendly identifier (first 8 hex chars).
+    ///
+    /// Used for CLI/TUI display. Not guaranteed unique forever, but good enough
+    /// for daily usage; later we’ll add collision handling when resolving IDs.
+    pub fn short(&self) -> String {
+        let s = self.0.to_string(); // UUID is hex with hyphens.
+        // Example: "550e8400-e29b-41d4-a716-446655440000"
+        // Take the first 8 chars for a concise prefix.
+        s.chars().take(8).collect()
+    }
+
+    // Full UUID string(used for export/debugging).
+    pub fn as_uuid_str(&self) -> String {
+        self.0.to_string()
+    }
 }
 
 /// Avalidated todo title.
