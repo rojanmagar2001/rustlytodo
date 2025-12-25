@@ -8,7 +8,7 @@ use tracing::{debug, info};
 
 use crate::{
     app::{context::AppContext, store::Store},
-    domain::todo::Title,
+    domain::todo::{Priority, Title},
     infra::memory_repo::MemoryTodoRepository,
 };
 
@@ -45,6 +45,14 @@ enum Commands {
         /// Optional notes
         #[arg(long)]
         notes: Option<String>,
+
+        /// Priority: P1 (high) .. P4 (low)
+        #[arg(long)]
+        priority: Option<String>,
+
+        /// Due datetime in RFC3339, e.g. 2026-01-02T09:00:00Z
+        #[arg(long)]
+        due: Option<String>,
     },
 
     /// List todos
@@ -84,8 +92,10 @@ pub fn run(ctx: AppContext) -> Result<()> {
             project,
             tags,
             notes,
+            priority,
+            due,
         } => {
-            use crate::domain::todo::{Notes, ProjectName, Tag, Todo};
+            use crate::domain::todo::{DueAt, Notes, Priority, ProjectName, Tag, Todo};
             use std::collections::BTreeSet;
 
             let title = Title::parse(title)?;
@@ -107,6 +117,14 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 todo.tags = set;
             }
 
+            if let Some(p) = priority {
+                todo.priority = Priority::parse(p)?;
+            }
+
+            if let Some(d) = due {
+                todo.due = Some(DueAt::parse_rfc3339(d)?);
+            }
+
             // For now we insert the constructed todo directly.
             // Later, add/edit will be proper use-cases with validation + events.
             let id = todo.id;
@@ -120,14 +138,16 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 println!("No todos yet 🎉");
             } else {
                 println!(
-                    "{:<10} {:<2} {:<3} {:<10} {:<18} {:<25} TITLE",
-                    "ID", "S", "P", "PROJECT", "TAGS", "DUE"
+                    "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} TITLE",
+                    "ID", "S", "P", "!", "PROJECT", "TAGS", "DUE",
                 );
                 for todo in todos {
+                    let now = time::OffsetDateTime::now_utc();
                     let due = todo
                         .due
                         .map(|d| d.format_rfc3339())
                         .unwrap_or_else(|| "-".to_string());
+                    let overdue = if todo.is_overdue(now) { "OVERDUE" } else { "" };
 
                     let tags = if todo.tags.is_empty() {
                         "-".to_string()
@@ -140,11 +160,12 @@ pub fn run(ctx: AppContext) -> Result<()> {
                     };
 
                     println!(
-                        "{:<10} {:<2} {:<3} {:<10} {:<18} {:<25} {}",
+                        "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} {}",
                         todo.id.short(),
                         todo.status_symbol(),
                         todo.priority.label(),
                         todo.project.as_str(),
+                        overdue,
                         tags,
                         due,
                         todo.title.as_str()

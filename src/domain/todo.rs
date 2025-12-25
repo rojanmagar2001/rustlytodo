@@ -282,10 +282,24 @@ impl Todo {
             Status::Done { .. } => "☑",
         }
     }
+
+    /// Returns true if the todo is open and its due date is before `now`.
+    pub fn is_overdue(&self, now: OffsetDateTime) -> bool {
+        if self.status.is_done() {
+            return false;
+        }
+
+        match self.due {
+            Some(due) => due.as_dt() < now,
+            None => false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use time::Duration;
+
     use super::*;
     use crate::domain::errors::DomainError;
 
@@ -331,6 +345,17 @@ mod tests {
         assert_eq!(todo.project.as_str(), "Inbox");
         assert!(todo.tags.is_empty());
         assert!(todo.notes.is_none());
+    }
+
+    #[test]
+    fn overdue_only_when_open_and_due_in_past() {
+        let now = OffsetDateTime::now_utc();
+        let mut todo = Todo::new(Title::parse("A").unwrap());
+        todo.due = Some(DueAt::from_dt(now - Duration::days(1)));
+        assert!(todo.is_overdue(now));
+
+        todo.mark_done().unwrap();
+        assert!(!todo.is_overdue(now));
     }
 
     #[test]
