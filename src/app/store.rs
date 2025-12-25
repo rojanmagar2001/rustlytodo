@@ -61,4 +61,8 @@ where
     pub fn repo_mut(&mut self) -> &mut R {
         self.service.repo_mut()
     }
+
+    pub fn set_all(&mut self, todos: Vec<Todo>) {
+        self.repo_mut().set_all(todos);
+    }
 }

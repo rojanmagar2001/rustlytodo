@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "todos": [
+    {
+      "id": "12c3dd16-6011-47d0-a396-cd070e974ed7",
+      "title": "Welcome to rustlytodo",
+      "notes": "Tip: use `todo add \"...\" --tag work`",
+      "project": "Inbox",
+      "tags": [],
+      "status": "Open",
+      "priority": "P2",
+      "due": null,
+      "created_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761585000,
+        0,
+        0,
+        0
+      ],
+      "updated_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761585000,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "c4567ec3-71c6-4936-8647-0843e8da46dc",
+      "title": "Press ? to view keybindings (TUI later)",
+      "notes": null,
+      "project": "Inbox",
+      "tags": [],
+      "status": "Open",
+      "priority": "P4",
+      "due": null,
+      "created_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761589000,
+        0,
+        0,
+        0
+      ],
+      "updated_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761589000,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "58194632-2320-43ea-b1d9-b2b1ac2ee18b",
+      "title": "Fix CI flaky test",
+      "notes": null,
+      "project": "Work",
+      "tags": [
+        "build",
+        "rust"
+      ],
+      "status": "Open",
+      "priority": "P1",
+      "due": [
+        2025,
+        362,
+        12,
+        20,
+        31,
+        761572000,
+        0,
+        0,
+        0
+      ],
+      "created_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761591000,
+        0,
+        0,
+        0
+      ],
+      "updated_at": [
+        2025,
+        359,
+        12,
+        20,
+        31,
+        761591000,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "36a3cab2-398f-4712-89ed-8695d79f5a36",
+      "title": "Renamed Persistent todo",
+      "notes": null,
+      "project": "work",
+      "tags": [
+        "rust"
+      ],
+      "status": "Open",
+      "priority": "P3",
+      "due": null,
+      "created_at": [
+        2025,
+        359,
+        12,
+        20,
+        37,
+        825825000,
+        0,
+        0,
+        0
+      ],
+      "updated_at": [
+        2025,
+        359,
+        12,
+        21,
+        16,
+        111773000,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}

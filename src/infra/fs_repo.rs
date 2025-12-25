@@ -1,4 +1,8 @@
-use std::path::PathBuf;
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -6,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     app::repository::TodoRepository,
     domain::todo::{Todo, TodoId},
+    infra::db_schema,
 };
 
 /// Current schema version for the on-disk JSON file.
@@ -40,23 +45,8 @@ impl JsonFileTodoRepository {
             let text = std::fs::read_to_string(&path)
                 .with_context(|| format!("failed reading db file: {}", path.display()))?;
 
-            let db: DbFile =
-                serde_json::from_str(&text).with_context(|| "failed parsing db JSON")?;
-
-            // For now, only version 1 is supported.
-            // We'll add migration in the next persistence steps.
-            if db.schema_version != SCHEMA_VERSION {
-                anyhow::bail!(
-                    "unsupported schema_version {} (expected {})",
-                    db.schema_version,
-                    SCHEMA_VERSION
-                );
-            }
-
-            Ok(Self {
-                path,
-                todos: db.todos,
-            })
+            let todos = db_schema::load_any(&text)?;
+            Ok(Self { path, todos: todos })
         } else {
             // Ensure parent dir exists
             if let Some(parent) = path.parent() {
@@ -74,17 +64,19 @@ impl JsonFileTodoRepository {
         }
     }
 
+    /// Save current in-memory state to disk using an atomic replace.
+    ///
+    /// Durability strategy (best-effort):
+    /// 1) write temp file
+    /// 2) fsync temp file
+    /// 3) rename temp -> final
+    /// 4) best-effort fsync parent dir
     pub fn save_atomic(&self) -> Result<()> {
-        let db = DbFile {
-            schema_version: SCHEMA_VERSION,
-            todos: self.todos.clone(),
-        };
-
-        let json = serde_json::to_string_pretty(&db).with_context(|| "failed serializing db")?;
+        let json = db_schema::write_current(&self.todos)?;
 
         let tmp_path = tmp_path_for(&self.path);
 
-        std::fs::write(&tmp_path, json)
+        write_file_and_sync(&tmp_path, json.as_bytes())
             .with_context(|| format!("failed writing temp db file: {}", tmp_path.display()))?;
 
         // Atomic replace on most platforms when temp is in same directory.
@@ -95,6 +87,11 @@ impl JsonFileTodoRepository {
                 self.path.display()
             )
         });
+
+        // Best-effort directory fsync (platform-dependent).
+        if let Some(parent) = self.path.parent() {
+            let _ = sync_dir_best_effort(parent)?;
+        }
 
         Ok(())
     }
@@ -107,8 +104,29 @@ fn tmp_path_for(path: &PathBuf) -> PathBuf {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "db.json".to_string());
     p.set_file_name(format!("{file_name}.tmp"));
-
     p
+}
+
+fn write_file_and_sync(path: &Path, bytes: &[u8]) -> Result<()> {
+    let mut f =
+        File::create(path).with_context(|| format!("failed creating file: {}", path.display()))?;
+    f.write_all(bytes)
+        .with_context(|| format!("failed writing file: {}", path.display()))?;
+    f.sync_all()
+        .with_context(|| format!("failed fsync file: {}", path.display()))?;
+
+    Ok(())
+}
+
+/// Best-effort fsync of a directory.
+/// On some platforms/filesystems this may fail; that's okay.
+fn sync_dir_best_effort(dir: &Path) -> Result<()> {
+    // On Unix-like systems (including macOS), opening a directory as a File is allowed.
+    // On Windows it may fail depending on permissions/filesystem.
+    let f = File::open(dir).with_context(|| format!("failed opening dir: {}", dir.display()))?;
+    f.sync_all()
+        .with_context(|| format!("failed fsync dir: {}", dir.display()))?;
+    Ok(())
 }
 
 impl TodoRepository for JsonFileTodoRepository {
@@ -131,5 +149,31 @@ impl TodoRepository for JsonFileTodoRepository {
 
     fn get(&self, id: TodoId) -> Option<Todo> {
         self.todos.iter().find(|t| t.id == id).cloned()
+    }
+
+    fn set_all(&mut self, todos: Vec<Todo>) {
+        self.todos = todos;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::todo::Title;
+    use tempfile::tempdir;
+
+    #[test]
+    fn fs_repo_roundtrip_persists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("db.json");
+
+        let mut repo = JsonFileTodoRepository::load_or_init(path.clone()).unwrap();
+        repo.add(Todo::new(Title::parse("A").unwrap()));
+        repo.save_atomic().unwrap();
+
+        let repo2 = JsonFileTodoRepository::load_or_init(path).unwrap();
+        let items = repo2.list();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title.as_str(), "A");
     }
 }

@@ -40,6 +40,10 @@ impl TodoRepository for MemoryTodoRepository {
     fn get(&self, id: TodoId) -> Option<Todo> {
         self.todos.iter().find(|t| t.id == id).cloned()
     }
+
+    fn set_all(&mut self, todos: Vec<Todo>) {
+        self.todos = todos;
+    }
 }
 
 #[cfg(test)]

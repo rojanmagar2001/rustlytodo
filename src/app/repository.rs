@@ -14,4 +14,7 @@ pub trait TodoRepository {
 
     /// Get a todo by full ID (exact match).
     fn get(&self, id: TodoId) -> Option<Todo>;
+
+    /// Replace the entire dataset (used for import/migrations).
+    fn set_all(&mut self, todos: Vec<Todo>);
 }

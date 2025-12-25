@@ -2,7 +2,7 @@
 //!
 //! This will coexist with the TUI later.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::{debug, info};
 
@@ -90,6 +90,20 @@ enum Commands {
 
         #[arg(long)]
         clear_tags: bool,
+    },
+
+    /// Export todos to a JSON file (lossless).
+    Export {
+        /// Output file path
+        #[arg(long)]
+        out: String,
+    },
+
+    /// Import todos from a JSON file (lossless). Replaces current DB.
+    Import {
+        /// Input file path
+        #[arg(long)]
+        r#in: String,
     },
 }
 
@@ -278,6 +292,43 @@ pub fn run(ctx: AppContext) -> Result<()> {
             } else {
                 println!("Failed to edit {}", id);
             }
+        }
+        Commands::Export { out } => {
+            use std::path::PathBuf;
+
+            let out_path = PathBuf::from(out);
+            let todos = store.list_todos();
+            let json = crate::infra::db_schema::write_current(&todos)?;
+
+            // Ensure parent dir exists if provided.
+            if let Some(parent) = out_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("failed creating export directory: {}", parent.display())
+                    })?;
+                }
+            }
+
+            std::fs::write(&out_path, json)
+                .with_context(|| format!("failed writing export file: {}", out_path.display()))?;
+
+            println!("Exported {} todos to {}", todos.len(), out_path.display());
+        }
+
+        Commands::Import { r#in } => {
+            use std::path::PathBuf;
+
+            let in_path = PathBuf::from(r#in);
+            let text = std::fs::read_to_string(&in_path)
+                .with_context(|| format!("failed reading import file: {}", in_path.display()))?;
+
+            let todos = crate::infra::db_schema::load_any(&text)?;
+            let count = todos.len();
+
+            store.set_all(todos);
+            store.repo_mut().save_atomic()?; // persist immediately
+
+            println!("Imported {} todos from {}", count, in_path.display());
         }
     }
 
