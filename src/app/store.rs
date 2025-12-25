@@ -8,7 +8,7 @@
 use anyhow::Result;
 
 use crate::{
-    app::{repository::TodoRepository, service::TodoService},
+    app::{errors::AppError, repository::TodoRepository, service::TodoService},
     domain::todo::{Title, Todo, TodoId, TodoPatch},
 };
 
@@ -64,5 +64,40 @@ where
 
     pub fn set_all(&mut self, todos: Vec<Todo>) {
         self.repo_mut().set_all(todos);
+    }
+
+    pub fn mark_done(&mut self, id: TodoId) -> Result<(), AppError> {
+        let Some(mut todo) = self.repo_mut().get(id) else {
+            return Err(AppError::TodoNotFound);
+        };
+        // Domain transition can fail if already done.
+        todo.mark_done().map_err(|_| AppError::TodoNotFound)?; // we’ll refine error mapping later
+        let ok = self.repo_mut().replace(todo);
+        if ok {
+            Ok(())
+        } else {
+            Err(AppError::TodoNotFound)
+        }
+    }
+
+    pub fn mark_open(&mut self, id: TodoId) -> Result<(), AppError> {
+        let Some(mut todo) = self.repo_mut().get(id) else {
+            return Err(AppError::TodoNotFound);
+        };
+        todo.mark_open().map_err(|_| AppError::TodoNotFound)?; // refine later
+        let ok = self.repo_mut().replace(todo);
+        if ok {
+            Ok(())
+        } else {
+            Err(AppError::TodoNotFound)
+        }
+    }
+
+    pub fn delete(&mut self, id: TodoId) -> Result<(), AppError> {
+        if self.repo_mut().remove(id) {
+            Ok(())
+        } else {
+            Err(AppError::TodoNotFound)
+        }
     }
 }

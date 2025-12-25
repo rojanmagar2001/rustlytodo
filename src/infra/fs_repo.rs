@@ -55,7 +55,7 @@ impl JsonFileTodoRepository {
                 })?;
             }
 
-            let mut repo = Self {
+            let repo = Self {
                 path,
                 todos: Vec::new(),
             };
@@ -153,6 +153,12 @@ impl TodoRepository for JsonFileTodoRepository {
 
     fn set_all(&mut self, todos: Vec<Todo>) {
         self.todos = todos;
+    }
+
+    fn remove(&mut self, id: TodoId) -> bool {
+        let before = self.todos.len();
+        self.todos.retain(|t| t.id != id);
+        self.todos.len() != before
     }
 }
 

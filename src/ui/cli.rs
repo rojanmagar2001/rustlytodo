@@ -2,6 +2,8 @@
 //!
 //! This will coexist with the TUI later.
 
+use std::io::{self, Write};
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::{debug, info};
@@ -9,7 +11,6 @@ use tracing::{debug, info};
 use crate::{
     app::{context::AppContext, store::Store},
     domain::todo::Title,
-    infra::fs_repo::JsonFileTodoRepository,
 };
 
 /// Top-level CLI definition.
@@ -56,7 +57,11 @@ enum Commands {
     },
 
     /// List todos
-    List,
+    List {
+        /// Output format: table (default) or json
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
 
     /// Edit an existing todo by short ID (from `list`)
     Edit {
@@ -113,6 +118,28 @@ enum Commands {
         #[arg(long)]
         r#in: String,
     },
+
+    /// Mark a todo as done
+    Done {
+        /// Todo ID (full UUID or unique prefix)
+        id: String,
+    },
+
+    /// Mark a todo as open/undone
+    Undone {
+        /// Todo ID (full UUID or unique prefix)
+        id: String,
+    },
+
+    /// Delete a todo (destructive)
+    Delete {
+        /// Todo ID (full UUID or unique prefix)
+        id: String,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 /// Peek `--debug` from args without fully running the CLI.
@@ -124,27 +151,52 @@ pub fn peek_debug_flag() -> bool {
 
 pub fn run(ctx: AppContext) -> Result<()> {
     let cli = Cli::parse();
+    let mut out = io::stdout();
+    run_inner(ctx, cli, &mut out)
+}
 
+fn run_inner(ctx: AppContext, cli: Cli, out: &mut dyn Write) -> Result<()> {
     debug!(?ctx.paths, "detected application paths");
     debug!(?ctx.config, "loaded configuration");
 
-    // In Milestone 3 this will be loaded from disk.
     let db_path = ctx.config.resolve_db_path(&ctx.paths);
     let mut store = {
-        let repo = JsonFileTodoRepository::load_or_init(db_path)?;
+        let repo = crate::infra::fs_repo::JsonFileTodoRepository::load_or_init(db_path)?;
         Store::new(repo)
     };
 
-    // debug!("DB path: {}", store.repo_mut().path.display());
-
+    // Seed defaults only if DB is empty/new.
     if store.is_empty() {
         let defaults = crate::app::seed::default_todos();
         store.insert_many(defaults);
-        // Persist the seeded defaults immediately.
         store.repo_mut().save_atomic()?;
     }
 
-    match cli.command.unwrap_or(Commands::Tui) {
+    handle_command(&mut store, cli.command.unwrap_or(Commands::Tui), out)
+}
+
+pub fn run_with_args(ctx: AppContext, args: impl IntoIterator<Item = String>) -> Result<()> {
+    let cli = Cli::parse_from(args);
+    let mut out = io::stdout();
+    run_inner(ctx, cli, &mut out)
+}
+
+/// Same as run_with_args, but writes output into a provided writer (tests).
+pub fn run_with_args_to_writer(
+    ctx: AppContext,
+    args: impl IntoIterator<Item = String>,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let cli = Cli::parse_from(args);
+    run_inner(ctx, cli, out)
+}
+
+fn handle_command(
+    store: &mut Store<crate::infra::fs_repo::JsonFileTodoRepository>,
+    command: Commands,
+    out: &mut dyn Write,
+) -> Result<()> {
+    match command {
         Commands::Tui => {
             // Placeholder until Milestone 5 (ratatui foundation).
             println!("TUI not implemented yet (coming in Milestone 5).");
@@ -196,47 +248,65 @@ pub fn run(ctx: AppContext) -> Result<()> {
             info!("Todo added");
             println!("Added {}", id.short());
         }
-        Commands::List => {
+        Commands::List { format } => {
             let todos = store.list_todos();
-            if todos.is_empty() {
-                println!("No todos yet 🎉");
-            } else {
-                println!(
-                    "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} TITLE",
-                    "ID", "S", "P", "!", "PROJECT", "TAGS", "DUE",
-                );
-                for todo in todos {
-                    let now = time::OffsetDateTime::now_utc();
-                    let due = todo
-                        .due
-                        .map(|d| d.format_rfc3339())
-                        .unwrap_or_else(|| "-".to_string());
-                    let overdue = if todo.is_overdue(now) { "OVERDUE" } else { "" };
 
-                    let tags = if todo.tags.is_empty() {
-                        "-".to_string()
+            match format.trim().to_ascii_lowercase().as_str() {
+                "json" => {
+                    let s = serde_json::to_string_pretty(&todos)
+                        .with_context(|| "failed serializing todos to json")?;
+                    writeln!(out, "{s}")?;
+                }
+                "table" => {
+                    if todos.is_empty() {
+                        writeln!(out, "No todos yet 🎉")?;
                     } else {
-                        todo.tags
-                            .iter()
-                            .map(|t| format!("#{}", t.as_str()))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    };
+                        writeln!(
+                            out,
+                            "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} {}",
+                            "ID", "S", "P", "!", "PROJECT", "TAGS", "DUE", "TITLE"
+                        )?;
 
-                    println!(
-                        "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} {}",
-                        todo.id.short(),
-                        todo.status_symbol(),
-                        todo.priority.label(),
-                        todo.project.as_str(),
-                        overdue,
-                        tags,
-                        due,
-                        todo.title.as_str()
-                    );
+                        for todo in todos {
+                            let now = time::OffsetDateTime::now_utc();
+                            let due = todo
+                                .due
+                                .map(|d| d.format_rfc3339())
+                                .unwrap_or_else(|| "-".to_string());
+
+                            let overdue = if todo.is_overdue(now) { "OVERDUE" } else { "" };
+
+                            let tags = if todo.tags.is_empty() {
+                                "-".to_string()
+                            } else {
+                                todo.tags
+                                    .iter()
+                                    .map(|t| format!("#{}", t.as_str()))
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            };
+
+                            writeln!(
+                                out,
+                                "{:<10} {:<2} {:<3} {:<8} {:<10} {:<18} {:<25} {}",
+                                todo.id.short(),
+                                todo.status_symbol(),
+                                todo.priority.label(),
+                                overdue,
+                                todo.project.as_str(),
+                                tags,
+                                due,
+                                todo.title.as_str()
+                            )?;
+                        }
+                    }
+                }
+                other => {
+                    writeln!(out, "unknown list format: {other} (use table|json)")?;
                 }
             }
         }
+
         Commands::Edit {
             id,
             title,
@@ -304,6 +374,77 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 println!("Failed to edit {}", id);
             }
         }
+
+        Commands::Done { id } => {
+            let todos = store.list_todos();
+            let todo_id = match resolve_id_input(&todos, &id) {
+                Ok(x) => x,
+                Err(msg) => {
+                    println!("{msg}");
+                    return Ok(());
+                }
+            };
+
+            match store.mark_done(todo_id) {
+                Ok(()) => {
+                    store.repo_mut().save_atomic()?;
+                    println!("Done {}", id);
+                }
+                Err(e) => {
+                    println!("{e}");
+                }
+            }
+        }
+
+        Commands::Undone { id } => {
+            let todos = store.list_todos();
+            let todo_id = match resolve_id_input(&todos, &id) {
+                Ok(x) => x,
+                Err(msg) => {
+                    println!("{msg}");
+                    return Ok(());
+                }
+            };
+
+            match store.mark_open(todo_id) {
+                Ok(()) => {
+                    store.repo_mut().save_atomic()?;
+                    println!("Undone {}", id);
+                }
+                Err(e) => {
+                    println!("{e}");
+                }
+            }
+        }
+
+        Commands::Delete { id, yes } => {
+            if !yes {
+                // Minimal confirmation: require explicit flag.
+                // (Better interactive prompts later; this is safe & scriptable.)
+                println!("Refusing to delete without confirmation. Re-run with --yes.");
+                return Ok(());
+            }
+
+            let todos = store.list_todos();
+            let todo_id = match resolve_id_input(&todos, &id) {
+                Ok(x) => x,
+                Err(msg) => {
+                    println!("{msg}");
+                    return Ok(());
+                }
+            };
+
+            match store.delete(todo_id) {
+                Ok(()) => {
+                    store.repo_mut().save_atomic()?;
+                    println!("Deleted {}", id);
+                }
+                Err(e) => {
+                    println!("{e}");
+                }
+            }
+        }
+
         Commands::Export { format, out } => {
             use std::path::PathBuf;
 
@@ -365,7 +506,6 @@ pub fn run(ctx: AppContext) -> Result<()> {
             println!("Imported {} todos from {}", count, in_path.display());
         }
     }
-
     Ok(())
 }
 

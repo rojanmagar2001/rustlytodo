@@ -17,4 +17,7 @@ pub trait TodoRepository {
 
     /// Replace the entire dataset (used for import/migrations).
     fn set_all(&mut self, todos: Vec<Todo>);
+
+    /// Remove by ID. Returns true if removed.
+    fn remove(&mut self, id: TodoId) -> bool;
 }
