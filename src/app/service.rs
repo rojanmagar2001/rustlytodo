@@ -48,6 +48,10 @@ where
             Ok(false)
         }
     }
+
+    pub fn repo_mut(&mut self) -> &mut R {
+        &mut self.repo
+    }
 }
 
 #[cfg(test)]

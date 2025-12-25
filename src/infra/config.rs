@@ -84,6 +84,13 @@ impl AppConfig {
 
         Ok(())
     }
+
+    /// Resolve the database path, using config override if present.
+    pub fn resolve_db_path(&self, paths: &AppPaths) -> PathBuf {
+        self.storage_path
+            .clone()
+            .unwrap_or_else(|| paths.data_dir.join("db.json"))
+    }
 }
 
 #[cfg(test)]

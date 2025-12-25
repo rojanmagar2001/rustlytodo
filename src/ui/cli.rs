@@ -8,8 +8,8 @@ use tracing::{debug, info};
 
 use crate::{
     app::{context::AppContext, store::Store},
-    domain::todo::{Priority, Title},
-    infra::memory_repo::MemoryTodoRepository,
+    domain::todo::Title,
+    infra::fs_repo::JsonFileTodoRepository,
 };
 
 /// Top-level CLI definition.
@@ -107,12 +107,19 @@ pub fn run(ctx: AppContext) -> Result<()> {
     debug!(?ctx.config, "loaded configuration");
 
     // In Milestone 3 this will be loaded from disk.
-    let repo = MemoryTodoRepository::new();
-    let mut store = Store::new(repo);
+    let db_path = ctx.config.resolve_db_path(&ctx.paths);
+    let mut store = {
+        let repo = JsonFileTodoRepository::load_or_init(db_path)?;
+        Store::new(repo)
+    };
+
+    // debug!("DB path: {}", store.repo_mut().path.display());
 
     if store.is_empty() {
         let defaults = crate::app::seed::default_todos();
         store.insert_many(defaults);
+        // Persist the seeded defaults immediately.
+        store.repo_mut().save_atomic()?;
     }
 
     match cli.command.unwrap_or(Commands::Tui) {
@@ -163,6 +170,7 @@ pub fn run(ctx: AppContext) -> Result<()> {
             // Later, add/edit will be proper use-cases with validation + events.
             let id = todo.id;
             store.insert_todo(todo);
+            store.repo_mut().save_atomic()?;
             info!("Todo added");
             println!("Added {}", id.short());
         }
@@ -265,6 +273,7 @@ pub fn run(ctx: AppContext) -> Result<()> {
 
             let changed = store.edit_todo(todo_id, patch)?;
             if changed {
+                store.repo_mut().save_atomic()?;
                 println!("Edited {}", id);
             } else {
                 println!("Failed to edit {}", id);

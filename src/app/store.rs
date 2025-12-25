@@ -53,4 +53,12 @@ where
     pub fn edit_todo(&mut self, id: TodoId, patch: TodoPatch) -> Result<bool> {
         self.service.edit_todo(id, patch)
     }
+
+    /// Escape hatch for infra-specific operations (like saving).
+    ///
+    /// We'll replace this with a cleaner "Unit of Work" abstraction later,
+    /// but it keeps our steps incremental.
+    pub fn repo_mut(&mut self) -> &mut R {
+        self.service.repo_mut()
+    }
 }
