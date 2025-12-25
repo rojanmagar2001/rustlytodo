@@ -4,6 +4,7 @@
 
 pub mod context;
 pub mod errors;
+pub mod query;
 pub mod repository;
 pub mod seed;
 pub mod service;

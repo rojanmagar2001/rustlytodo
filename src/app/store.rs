@@ -9,7 +9,10 @@ use anyhow::Result;
 
 use crate::{
     app::{errors::AppError, repository::TodoRepository, service::TodoService},
-    domain::todo::{Title, Todo, TodoId, TodoPatch},
+    domain::{
+        errors::DomainError,
+        todo::{Title, Todo, TodoId, TodoPatch},
+    },
 };
 
 /// App store that owns stateful dependencies.
@@ -70,10 +73,14 @@ where
         let Some(mut todo) = self.repo_mut().get(id) else {
             return Err(AppError::TodoNotFound);
         };
-        // Domain transition can fail if already done.
-        todo.mark_done().map_err(|_| AppError::TodoNotFound)?; // we’ll refine error mapping later
-        let ok = self.repo_mut().replace(todo);
-        if ok {
+
+        match todo.mark_done() {
+            Ok(()) => {}
+            Err(DomainError::AlreadyDone) => return Err(AppError::AlreadyDone),
+            Err(_) => return Err(AppError::TodoNotFound),
+        }
+
+        if self.repo_mut().replace(todo) {
             Ok(())
         } else {
             Err(AppError::TodoNotFound)
@@ -84,9 +91,14 @@ where
         let Some(mut todo) = self.repo_mut().get(id) else {
             return Err(AppError::TodoNotFound);
         };
-        todo.mark_open().map_err(|_| AppError::TodoNotFound)?; // refine later
-        let ok = self.repo_mut().replace(todo);
-        if ok {
+
+        match todo.mark_open() {
+            Ok(()) => {}
+            Err(DomainError::AlreadyOpen) => return Err(AppError::AlreadyOpen),
+            Err(_) => return Err(AppError::TodoNotFound),
+        }
+
+        if self.repo_mut().replace(todo) {
             Ok(())
         } else {
             Err(AppError::TodoNotFound)

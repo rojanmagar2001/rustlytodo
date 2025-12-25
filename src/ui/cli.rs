@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand};
 use tracing::{debug, info};
 
 use crate::{
+    app::repository::TodoRepository,
     app::{context::AppContext, store::Store},
     domain::todo::Title,
 };
@@ -58,6 +59,48 @@ enum Commands {
 
     /// List todos
     List {
+        /// Output format: table (default) or json
+        #[arg(long, default_value = "table")]
+        format: String,
+
+        /// Filter by status: open|done
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Filter by project name
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Filter by tag (e.g. --tag rust)
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Search text in title/notes
+        #[arg(long)]
+        search: Option<String>,
+
+        /// Only show overdue (open + due in past)
+        #[arg(long)]
+        overdue: bool,
+
+        /// Filter by priority: P1..P4
+        #[arg(long)]
+        priority: Option<String>,
+
+        /// Sort by: due|priority|created
+        #[arg(long, default_value = "due")]
+        sort: String,
+
+        /// Sort descending
+        #[arg(long)]
+        desc: bool,
+    },
+
+    /// Show a single todo
+    Show {
+        /// Todo ID (full UUID or unique prefix)
+        id: String,
+
         /// Output format: table (default) or json
         #[arg(long, default_value = "table")]
         format: String,
@@ -248,8 +291,64 @@ fn handle_command(
             info!("Todo added");
             println!("Added {}", id.short());
         }
-        Commands::List { format } => {
+
+        Commands::List {
+            format,
+            status,
+            project,
+            tag,
+            search,
+            overdue,
+            priority,
+            sort,
+            desc,
+        } => {
+            use crate::app::query::{ListQuery, SortKey, StatusFilter, apply_list_query};
+            use crate::domain::todo::Priority;
+
+            let now = time::OffsetDateTime::now_utc();
+
+            // Parse status flag
+            let status = match status.as_deref().map(|s| s.trim().to_ascii_lowercase()) {
+                None => None,
+                Some(s) if s == "open" => Some(StatusFilter::Open),
+                Some(s) if s == "done" => Some(StatusFilter::Done),
+                Some(other) => {
+                    writeln!(out, "unknown --status {other} (use open|done)")?;
+                    return Ok(());
+                }
+            };
+
+            // Parse priority
+            let priority = match priority {
+                None => None,
+                Some(p) => Some(Priority::parse(p).map_err(|e| anyhow::anyhow!(e))?),
+            };
+
+            // Parse sort key
+            let sort_key = match sort.trim().to_ascii_lowercase().as_str() {
+                "due" => SortKey::Due,
+                "priority" => SortKey::Priority,
+                "created" => SortKey::Created,
+                other => {
+                    writeln!(out, "unknown --sort {other} (use due|priority|created)")?;
+                    return Ok(());
+                }
+            };
+
+            let q = ListQuery {
+                status,
+                project,
+                tag,
+                search,
+                overdue,
+                priority,
+                sort: sort_key,
+                desc,
+            };
+
             let todos = store.list_todos();
+            let todos = apply_list_query(todos, &q, now);
 
             match format.trim().to_ascii_lowercase().as_str() {
                 "json" => {
@@ -259,7 +358,7 @@ fn handle_command(
                 }
                 "table" => {
                     if todos.is_empty() {
-                        writeln!(out, "No todos yet 🎉")?;
+                        writeln!(out, "No matching todos.")?;
                     } else {
                         writeln!(
                             out,
@@ -268,13 +367,12 @@ fn handle_command(
                         )?;
 
                         for todo in todos {
-                            let now = time::OffsetDateTime::now_utc();
                             let due = todo
                                 .due
                                 .map(|d| d.format_rfc3339())
                                 .unwrap_or_else(|| "-".to_string());
 
-                            let overdue = if todo.is_overdue(now) { "OVERDUE" } else { "" };
+                            let overdue_mark = if todo.is_overdue(now) { "OVERDUE" } else { "" };
 
                             let tags = if todo.tags.is_empty() {
                                 "-".to_string()
@@ -292,7 +390,7 @@ fn handle_command(
                                 todo.id.short(),
                                 todo.status_symbol(),
                                 todo.priority.label(),
-                                overdue,
+                                overdue_mark,
                                 todo.project.as_str(),
                                 tags,
                                 due,
@@ -303,6 +401,72 @@ fn handle_command(
                 }
                 other => {
                     writeln!(out, "unknown list format: {other} (use table|json)")?;
+                }
+            }
+        }
+
+        Commands::Show { id, format } => {
+            let todos = store.list_todos();
+            let todo_id = match resolve_id_input(&todos, &id) {
+                Ok(x) => x,
+                Err(msg) => {
+                    writeln!(out, "{msg}")?;
+                    return Ok(());
+                }
+            };
+
+            let Some(todo) = store.repo_mut().get(todo_id) else {
+                writeln!(out, "todo not found")?;
+                return Ok(());
+            };
+
+            match format.trim().to_ascii_lowercase().as_str() {
+                "json" => {
+                    let s = serde_json::to_string_pretty(&todo)
+                        .with_context(|| "failed serializing todo to json")?;
+                    writeln!(out, "{s}")?;
+                }
+                "table" => {
+                    // Human friendly details
+                    writeln!(out, "ID:       {}", todo.id.as_uuid_str())?;
+                    writeln!(out, "Short:    {}", todo.id.short())?;
+                    writeln!(
+                        out,
+                        "Status:   {}",
+                        if todo.status.is_done() {
+                            "Done"
+                        } else {
+                            "Open"
+                        }
+                    )?;
+                    writeln!(out, "Priority: {}", todo.priority.label())?;
+                    writeln!(out, "Project:  {}", todo.project.as_str())?;
+                    writeln!(
+                        out,
+                        "Due:      {}",
+                        todo.due
+                            .map(|d| d.format_rfc3339())
+                            .unwrap_or_else(|| "-".to_string())
+                    )?;
+
+                    let tags = if todo.tags.is_empty() {
+                        "-".to_string()
+                    } else {
+                        todo.tags
+                            .iter()
+                            .map(|t| format!("#{}", t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    writeln!(out, "Tags:     {tags}")?;
+
+                    writeln!(out, "Title:    {}", todo.title.as_str())?;
+                    if let Some(n) = &todo.notes {
+                        writeln!(out, "Notes:\n{}\n", n.as_str())?;
+                    }
+                }
+                other => {
+                    writeln!(out, "unknown show format: {other} (use table|json)")?;
                 }
             }
         }
