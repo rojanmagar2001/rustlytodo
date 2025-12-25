@@ -53,3 +53,31 @@ impl Todo {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::errors::DomainError;
+
+    #[test]
+    fn title_parse_rejects_empty() {
+        let err = Title::parse("   ").unwrap_err();
+        match err {
+            DomainError::EmptyTitle => {}
+        }
+    }
+
+    #[test]
+    fn title_parse_trims_and_accepts() {
+        let title = Title::parse("  Buy milk  ").expect("valid title");
+        assert_eq!(title.as_str(), "Buy milk");
+    }
+
+    #[test]
+    fn todo_new_generates_id() {
+        let t1 = Todo::new(Title::parse("A").unwrap());
+        let t2 = Todo::new(Title::parse("B").unwrap());
+        // Probabilistic but effectively guaranteed for v4 UUIDs.
+        assert!(t1.id != t2.id);
+    }
+}
