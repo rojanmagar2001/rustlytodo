@@ -21,6 +21,13 @@ impl TodoId {
         Self(Uuid::new_v4())
     }
 
+    /// Parse a full UUID string into a TodoId.
+    pub fn parse_uuid(input: impl AsRef<str>) -> Result<Self, DomainError> {
+        let s = input.as_ref().trim();
+        let id = Uuid::parse_str(s).map_err(|_| DomainError::InvalidTodoId)?;
+        Ok(Self(id))
+    }
+
     /// A short, human-friendly identifier (first 8 hex chars).
     ///
     /// Used for CLI/TUI display. Not guaranteed unique forever, but good enough
@@ -355,6 +362,12 @@ mod tests {
 
     use super::*;
     use crate::domain::errors::DomainError;
+
+    #[test]
+    fn todoid_parse_uuid_accepts_valid_uuid() {
+        let id = TodoId::parse_uuid("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        assert_eq!(id.short(), "550e8400");
+    }
 
     #[test]
     fn title_parse_rejects_empty() {

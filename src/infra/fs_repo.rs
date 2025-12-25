@@ -86,11 +86,11 @@ impl JsonFileTodoRepository {
                 tmp_path.display(),
                 self.path.display()
             )
-        });
+        })?;
 
         // Best-effort directory fsync (platform-dependent).
         if let Some(parent) = self.path.parent() {
-            let _ = sync_dir_best_effort(parent)?;
+            let _ = sync_dir_best_effort(parent);
         }
 
         Ok(())

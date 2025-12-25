@@ -94,6 +94,10 @@ enum Commands {
 
     /// Export todos to a JSON file (lossless).
     Export {
+        /// Format: json (lossless) or csv (basic)
+        #[arg(long, default_value = "json")]
+        format: String,
+
         /// Output file path
         #[arg(long)]
         out: String,
@@ -101,6 +105,10 @@ enum Commands {
 
     /// Import todos from a JSON file (lossless). Replaces current DB.
     Import {
+        /// Format: json (lossless) or csv (basic)
+        #[arg(long, default_value = "json")]
+        format: String,
+
         /// Input file path
         #[arg(long)]
         r#in: String,
@@ -245,9 +253,12 @@ pub fn run(ctx: AppContext) -> Result<()> {
             use std::collections::BTreeSet;
 
             let todos = store.list_todos();
-            let Some(todo_id) = resolve_short_id(&todos, &id) else {
-                println!("No todo found with id prefix: {}", id);
-                return Ok(());
+            let todo_id = match resolve_id_input(&todos, &id) {
+                Ok(x) => x,
+                Err(msg) => {
+                    println!("{msg}");
+                    return Ok(());
+                }
             };
 
             let mut patch = TodoPatch::default();
@@ -293,36 +304,59 @@ pub fn run(ctx: AppContext) -> Result<()> {
                 println!("Failed to edit {}", id);
             }
         }
-        Commands::Export { out } => {
+        Commands::Export { format, out } => {
             use std::path::PathBuf;
 
             let out_path = PathBuf::from(out);
             let todos = store.list_todos();
-            let json = crate::infra::db_schema::write_current(&todos)?;
 
-            // Ensure parent dir exists if provided.
-            if let Some(parent) = out_path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent).with_context(|| {
-                        format!("failed creating export directory: {}", parent.display())
+            match format.trim().to_ascii_lowercase().as_str() {
+                "json" => {
+                    let json = crate::infra::db_schema::write_current(&todos)?;
+
+                    if let Some(parent) = out_path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            std::fs::create_dir_all(parent).with_context(|| {
+                                format!("failed creating export directory: {}", parent.display())
+                            })?;
+                        }
+                    }
+
+                    std::fs::write(&out_path, json).with_context(|| {
+                        format!("failed writing export file: {}", out_path.display())
                     })?;
                 }
+                "csv" => {
+                    crate::infra::csv_io::export_csv(&out_path, &todos)?;
+                }
+                other => {
+                    println!("unknown export format: {other} (use json|csv)");
+                    return Ok(());
+                }
             }
-
-            std::fs::write(&out_path, json)
-                .with_context(|| format!("failed writing export file: {}", out_path.display()))?;
 
             println!("Exported {} todos to {}", todos.len(), out_path.display());
         }
 
-        Commands::Import { r#in } => {
+        Commands::Import { format, r#in } => {
             use std::path::PathBuf;
 
             let in_path = PathBuf::from(r#in);
-            let text = std::fs::read_to_string(&in_path)
-                .with_context(|| format!("failed reading import file: {}", in_path.display()))?;
 
-            let todos = crate::infra::db_schema::load_any(&text)?;
+            let todos = match format.trim().to_ascii_lowercase().as_str() {
+                "json" => {
+                    let text = std::fs::read_to_string(&in_path).with_context(|| {
+                        format!("failed reading import file: {}", in_path.display())
+                    })?;
+                    crate::infra::db_schema::load_any(&text)?
+                }
+                "csv" => crate::infra::csv_io::import_csv(&in_path)?,
+                other => {
+                    println!("unknown import format: {other} (use json|csv)");
+                    return Ok(());
+                }
+            };
+
             let count = todos.len();
 
             store.set_all(todos);
@@ -335,9 +369,39 @@ pub fn run(ctx: AppContext) -> Result<()> {
     Ok(())
 }
 
-fn resolve_short_id(
+fn resolve_id_input(
     todos: &[crate::domain::todo::Todo],
-    short: &str,
-) -> Option<crate::domain::todo::TodoId> {
-    todos.iter().find(|t| t.id.short() == short).map(|t| t.id)
+    input: &str,
+) -> Result<crate::domain::todo::TodoId, String> {
+    let s = input.trim();
+
+    // 1) If it's a full UUID, accept it directly.
+    if let Ok(id) = crate::domain::todo::TodoId::parse_uuid(s) {
+        return Ok(id);
+    }
+
+    // 2) Otherwise treat it as a prefix match on short() or full UUID.
+    if s.len() < 4 {
+        return Err("id prefix too short (use at least 4 chars, or full UUID)".to_string());
+    }
+
+    let mut matches = Vec::new();
+    for t in todos {
+        let full = t.id.as_uuid_str();
+        if t.id.short() == s || full.starts_with(s) {
+            matches.push((t.id, t.title.as_str().to_string()));
+        }
+    }
+
+    match matches.len() {
+        0 => Err(format!("no todo found matching id: {}", s)),
+        1 => Ok(matches[0].0),
+        _ => {
+            let mut msg = format!("ambiguous id '{}'. Matches:\n", s);
+            for (id, title) in matches.into_iter().take(10) {
+                msg.push_str(&format!("  {}  {}\n", id.short(), title));
+            }
+            Err(msg)
+        }
+    }
 }

@@ -29,4 +29,7 @@ pub enum DomainError {
 
     #[error("cannot mark as open: already open")]
     AlreadyOpen,
+
+    #[error("invalid todo id (expected UUID)")]
+    InvalidTodoId,
 }

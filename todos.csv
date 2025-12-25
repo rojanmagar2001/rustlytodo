@@ -1,0 +1,5 @@
+id,title,status,priority,project,due,notes,tags
+12c3dd16-6011-47d0-a396-cd070e974ed7,Welcome to rustlytodo,open,P2,Inbox,,"Tip: use `todo add ""..."" --tag work`",
+c4567ec3-71c6-4936-8647-0843e8da46dc,Press ? to view keybindings (TUI later),open,P4,Inbox,,,
+58194632-2320-43ea-b1d9-b2b1ac2ee18b,Fix CI flaky test,open,P1,Work,2025-12-28T12:20:31.761572Z,,"build,rust"
+36a3cab2-398f-4712-89ed-8695d79f5a36,Renamed Persistent todo,open,P3,work,,,rust
